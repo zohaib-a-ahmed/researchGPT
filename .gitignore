@@ -1,2 +1,4 @@
 .chainlit
 atlas_env
+docs/
+__pycache__
