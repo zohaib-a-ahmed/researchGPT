@@ -1,5 +1,7 @@
-import chainlit as cl
 import os
+import tempfile
+import requests
+from semanticscholar import SemanticScholar
 from langchain import LLMChain
 from langchain.document_loaders import DirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -10,16 +12,16 @@ from langchain.memory import ConversationBufferMemory
 from langchain.chat_models import ChatOpenAI
 from langchain.agents import ZeroShotAgent, AgentExecutor
 from langchain.llms import OpenAI
-from langchain.agents import load_tools
 from langchain.tools import Tool
-from pydantic import BaseModel, Field
 from langchain.utilities import SerpAPIWrapper
 
 class AgentCreator():
 
     def __init__(self) -> None:
         self.tools = []
-        self.prompt = ''
+        self.prompt = None
+        self.documents = None
+        self.topic = ""
 
     def createAgent(self, llm: ChatOpenAI) -> AgentExecutor:
 
@@ -61,13 +63,41 @@ class AgentCreator():
             ),
         )
     
-    def createQA(self, llm: OpenAI, embeddings: OpenAIEmbeddings) -> RetrievalQA:
+    def findResearch(self, topic: str):
+        sch = SemanticScholar()
+        results = sch.search_paper(topic, limit=15, fields=['title', 'year', 'openAccessPdf'])
+        print(f"Results Found: {len}")
+        data = []
+        count_open_access = 0 
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            print(f"Temporary directory created: {tmpdir}")
 
-        loader = DirectoryLoader('docs/', show_progress=True)
-        data = loader.load()
+            for item in results.items:
+                if count_open_access >= 5:
+                    break 
+                
+                if item.openAccessPdf:
+                    response = requests.get(item.openAccessPdf['url'])
+                    if response.status_code == 200:
+                        pdf_content = response.content
+                        pdf_filename = os.path.join(tmpdir, f"{item.title}.docx")
+                        with open(pdf_filename, "wb") as pdf_file:
+                            pdf_file.write(pdf_content)
+                        print(f"Loaded: {item.title}")
+                        count_open_access += 1
+                    else:
+                        print(f"Failed to download PDF from {item.title}")
+
+            loader = DirectoryLoader(tmpdir, show_progress=True)
+            self.documents = loader.load()
+        
+        self.topic = topic
+            
+    def createQA(self, llm: OpenAI, embeddings: OpenAIEmbeddings) -> RetrievalQA:
         
         splitter = RecursiveCharacterTextSplitter(chunk_size = 500, chunk_overlap= 100, separators = ['\n', '\n\n'])
-        splits = splitter.split_documents(data)
+        splits = splitter.split_documents(self.documents)
 
         vectorstore = Chroma.from_documents(documents=splits, embedding=embeddings)
         qa_chain = RetrievalQA.from_llm(llm,retriever=vectorstore.as_retriever())
@@ -76,7 +106,13 @@ class AgentCreator():
             Tool.from_function(
                 func=qa_chain.run,
                 name="Document Search",
-                description="useful for when you need to access research on a specific question",
-                coroutine = qa_chain.arun
+                description=f"useful for when you need to access research on a specific question regarding {self.topic}",
+                coroutine = qa_chain.arun,
+                return_direct=True
             )
         )
+
+if __name__=="__main__":
+    creator = AgentCreator()
+    creator.findResearch("Muscle Hypertrophy and Load Effects")
+    print(len(creator.documents))
