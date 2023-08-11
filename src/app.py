@@ -12,10 +12,10 @@ async def setup():
     embeddings = OpenAIEmbeddings(openai_api_key= os.environ['OPENAI_API_KEY'])
     creator = AgentCreator()
 
-    topic = await cl.AskUserMessage(content="What is the topic of discussion today?").send()
+    topic = await cl.AskUserMessage(content="Hello! What topic should I look for research for?").send()
     if topic:
         await cl.Message(
-            content=f"Searching for research on: {topic['content']}",
+            content=f"I've found some research on {topic['content']}, ask me anything about it!",
         ).send()
 
     creator.findResearch(topic['content'])
